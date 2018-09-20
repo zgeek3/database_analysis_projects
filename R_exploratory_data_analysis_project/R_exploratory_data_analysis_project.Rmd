@@ -1,0 +1,1090 @@
+United States Public Elementary-Secondary Education spending (2016)
+========================================================
+by Z. McLaughlin
+========================================================
+
+# Introduction
+
+There's been a lot of media attention to teacher salaries.  This exploration
+covers various elements of how money is spent on education.  One area of 
+particular interest is spending in Oklahoma which has gotten a lot of attention
+in the news recently.  Exploration covers overall trends in spending per student
+across the country, but then focuses is in Oklahoma vs California vs New Jersey
+to see how things compare.
+
+[Example youtube video of teachers in Oklahoma changing jobs.](http://kfor.com/2018/06/06/watch-oklahoma-teachers-break-down-explaining-why-they-are-leaving-the-classroom/)
+
+# Dataset
+
+There is a government census done of all public schools in the United States.
+This data for 2016 is published here:
+
+[2016 Public Elementary-Secondary Education Finance Data](https://www.census.gov/data/tables/2016/econ/school-finances/secondary-education-finance.html)
+
+Since none of the provided tables contained all the desired information created
+a cleaned dataset using the following information:
+
+* [All Data Items](https://www2.census.gov/programs-surveys/school-finances/tables/2016/secondary-education-finance/elsec16.xls) - Contains the most comprehensive data.
+* [elsec16t.xls](https://www2.census.gov/programs-surveys/school-finances/tables/2016/secondary-education-finance/elsec16t.xls) - Contains state information for each school
+* [school16doc.doc](https://www2.census.gov/programs-surveys/school-finances/tables/2016/secondary-education-finance/school16doc.doc) - Contains the key for all the column names and key for states. 
+
+Tables attached to project assignment:
+
+* elsec_16.csv
+* elect16.csv
+* state_info_table.csv
+
+Cleaned data created has the following column headers:
+
+* "STATE" - Two letter state abbreviation
+* "IDCENSUS" - Census id for the school district
+* "NAME" - School district name
+* "CONUM" - ANSI State and County Code
+* "ENROLL" - Number of students enrolled
+* "TOTALREV" - Total revenue in thousands
+* "TFEDREV" - Total federal revenue in thousands
+* "TSTREV" - Total state revenue in thousands
+* "TLOCREV" - Total local revenue in thousands
+* "TOTALEXP" - Total Expenses in thousands
+* "TCURISAL" - Total salaries & wages for instruction in thousands
+* "TCURIBEN" - Total benefits for instruction in thousands
+* "PPCSTOT" - Per student total spending
+* "PPSALWG" - Per student total salaries and wages
+* "PPEMPBEN" - Per student total benefit payments
+* "PPITOTAL" - Per student total spending for instruction
+* "PPISALWG" - Per student total spending for salaries and wages for instruction
+* "PPIEMBEN" - Per student total employee benefits for instruction
+
+After cleaning data, decided to only include school districts with at least
+50 students enrolled.
+
+Added a few more columns later in the exploration:
+
+* "PPTISB" - Per student money spent on salaries and benefits for instruction
+* "PPPOI" - Percentage of money spent on teacher compensation
+* "PLOCALREV" - Local rev percentage of total revenue
+* "OKCA" - Limited number of states for analysis
+* "PPNORM" - Teacher compensation per student normalized for cost 
+of living.
+* "PPTEACH" - Teacher compensation per student normalized for class size
+
+Note:  Teacher compensation = Salary + benefits
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using in your analysis in this code
+# chunk.
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk. This
+# prevents the code from displaying in the knitted HTML output. You should set
+# echo=FALSE for all code chunks in your file, unless it makes sense for your
+# report to show the code that generated a particular plot.
+
+# The other parameters for "message" and "warning" should also be set to FALSE
+# for other code chunks once you have verified that each plot comes out as you
+# want it to. This will clean up the flow of your report.
+
+library(ggplot2)
+library(dplyr)
+library(data.table)
+library(GGally)
+```
+
+```{r echo=FALSE,message=FALSE, warning=FALSE, results="hide",load_the_data}
+
+# This section loads and cleans up the data
+
+
+# This is the big file that contains lots of key info, but for some reason does not 
+# contain state info so will need to merge with a file that contains state info. 
+
+full_sd <- read.csv('./data/elsec_16t.csv')
+head(full_sd)
+
+# Cleaning up the data to just the data of interest
+
+sdw <- subset(full_sd, 
+              select=c(
+                "IDCENSUS", 
+                "NAME",
+                "CONUM",
+                "ENROLL",
+                "TOTALREV",
+                "TFEDREV",
+                "TSTREV",
+                "TLOCREV",
+                "TOTALEXP",
+                "TCURISAL",
+                "TCURIBEN",
+                "PPCSTOT",
+                "PPSALWG",
+                "PPEMPBEN",
+                "PPITOTAL",
+                "PPISALWG",
+                "PPIEMBEN"
+                ))
+head(sdw)
+
+# Discovered some data inconsistencies when cleaning the data and found looking 
+# for Calhoun reveals some problems when the data was merged incorrectly so used
+# searches for Calhoun to spot check the data is correct. Commented these lines
+# out laster because knitr seemed to have a problem with them.  
+
+# sdw[sdw$NAME %like% "CALHOUN", ]
+
+# Reading in table that contains state info.
+
+stateid <- read.csv('./data/elsec16.csv')
+head(stateid)
+stateid <- subset(stateid, 
+              select=c(
+                "STATE",
+                "IDCENSUS",
+                "NAME"
+              ))
+head(stateid)
+
+stateid[stateid$NAME %like% "CALHOUN", ]
+
+# Reading in the state data tables to take state from numerica to two letter 
+# abreviation.
+
+state_name <- read.csv('./data/state_info_table.csv')
+
+head(state_name)
+
+# Discovered the state code was in two different formats.  Using help from
+# https://stackoverflow.com/questions/40097343/joining-two-datasets-with-different-classes
+# was able to fix them up to match them up..
+sapply(state_name,class)
+sapply(stateid,class)
+
+state_name$State.Code <- as.integer(as.character(state_name$State.Code))
+
+# Joining tables to add in the state abbreviation.
+
+newone <- stateid %>%
+  left_join(state_name, by= c("STATE" = "State.Code"))
+head(newone)
+
+# newone[newone$NAME %like% "CALHOUN", ]
+
+# Verifying that IDCENSUS have same type in different tables.
+sapply(newone,class)
+sapply(sdw,class)
+
+full_working <- newone %>%
+  left_join(sdw, by= c("IDCENSUS" = "IDCENSUS"))
+
+head(full_working)
+
+# full_working[full_working$NAME.x %like% "CALHOUN", ]
+
+# Need to reduce down to just desired data.  There's a lot of data not needed
+# For this investigation.
+
+colnames(full_working)
+
+full_working_subset <- subset(full_working, 
+                       select=c(
+                         "State",
+                         "IDCENSUS",
+                         "NAME.y",
+                         "CONUM",
+                         "ENROLL",
+                         "TOTALREV",
+                         "TFEDREV",
+                         "TSTREV",
+                         "TLOCREV",
+                         "TOTALEXP",
+                         "TCURISAL",
+                         "TCURIBEN",
+                         "PPCSTOT",
+                         "PPSALWG",
+                         "PPEMPBEN",
+                         "PPITOTAL",
+                         "PPISALWG",
+                         "PPIEMBEN"
+                       ))
+
+head(full_working_subset)
+# full_working_subset[full_working_subset$NAME.y %like% "CALHOUN", ]
+
+# Need to change some of the column names make it all consistent.
+
+colnames(full_working_subset)[colnames(full_working_subset)=="NAME.y"] <- "NAME"
+colnames(full_working_subset)[colnames(full_working_subset)=="State"] <- "STATE"
+
+colnames(full_working)
+
+# Checking to make sure the merged data looks good
+
+#full_working_subset[full_working_subset$NAME %like% "CALHOUN", ]
+
+# Preliminary investigation shows there are schools with 0 enrollment.  Decide 
+# only include schools with 50+ students Enrolled.
+
+summary(full_working_subset)
+clean_data <- full_working_subset[full_working_subset$ENROLL>=50,]
+clean_data <- clean_data[clean_data$ENROLL != "NA",]
+
+
+head(clean_data)
+# clean_data[clean_data$NAME %like% "CALHOUN", ]
+
+summary(clean_data)
+write.table(clean_data, "./data/clean_edu_data.csv", sep="\t")
+
+
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, setting_variable_info}
+
+# Setting up variables to use in graphs for expanded info on what is being
+# graphed.
+
+ENROLL_SUB <- "Number of students enrolled in the district"
+TOTALREV_SUB <- "Total revenue in thousands (USD)"
+TFEDREV_SUB <-"Total federal revenue in thousands (USD)"
+TSTREV_SUB <- "Total state revenue in thousands (USD)"
+TLOCREV_SUB <-  "Total local revenue in thousands (USD)"
+TOTALEXP_SUB <- "Total Expenses in thousands (USD)"
+TCURISAL_SUB <-"Total salaries & wages for instruction in 
+  thousands(USD)"
+TCURIBEN_SUB <- "Total benefits for instruction in thousands (USD)"
+PPCSTOT_SUB <- "Per student total spending (USD)"
+PPSALWG_SUB <- "Per student total salaries and wages (USD)"
+PPEMPBEN_SUB <- "Per student total benefit payments (USD)"
+PPITOTAL_SUB <- "Per student total spending for instruction (USD)"
+PPISALWG_SUB <- "Per student total spending for salaries and wages for   
+instruction (USD)"
+PPIEMBEN_SUB <- "Per student total employee benefits for instruction (USD)"
+
+# The columns that are added later
+
+PPTISB_SUB <- "Teacher compensation per student (USD)"
+PPPOI_SUB <- "Percentage of money spent on intr sal and benefits (0-1)"
+PLOCALREV_SUB <- "Local rev percentage of total revenue (0-1)"
+OKCA_SUB <- "New column with limited number of states for analysis"
+PPNORM_SUB <- "Teacher comp per student normalized for cost of living (USD)"
+PPTEACH_SUB <- "Teacher comp per student normalized for class size (USD)"
+```
+
+#  Summary of cleaned data
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,clean_data_summary}
+
+sdata <- subset(clean_data, 
+                       select=c(
+                         "ENROLL",
+                         "TOTALREV",
+                         "TFEDREV",
+                         "TSTREV",
+                         "TLOCREV",
+                         "TOTALEXP",
+                         "TCURISAL",
+                         "TCURIBEN",
+                         "PPCSTOT",
+                         "PPSALWG",
+                         "PPEMPBEN",
+                         "PPITOTAL",
+                         "PPISALWG",
+                         "PPIEMBEN"
+                       ))
+summary(sdata)
+
+```
+The data varies a lot:  
+
+* Enrollment - One school district has almost a million students while others 
+have less than 50 (although anything less than 50 was filtered out.)
+* Total revenue max is over $27 billion dollars 
+* Max spent per pupil/student is $228,102
+* Just a quick look at the Revenue from federal, state and local, it's clear
+that federal only plays a small part in funding education
+* The per student total spending varies from -1,472 to 228,102
+indicating that 1.  Some data might be questionable so it's better to look
+at trends rather than the outliers.
+
+# Univariate Plots Section
+> **Histogram exploration**
+
+Investigating how large the school districts are (note each district may 
+contain a different number of separate schools.)  Also investigating what 
+the per student spending looks like. Median is marked with red dashed line.
+```{r echo=FALSE,message=FALSE,warning=FALSE,histograms_of_spending}
+
+# Setting text size samller to make the graphs more readable
+theme_set(theme_grey(base_size = 10)) 
+
+
+ggplot(data=clean_data, aes(x=ENROLL )) +
+  xlim(0,80000) + 
+  xlab(ENROLL_SUB) + 
+  geom_histogram(binwidth=500,color='black',fill='blue') + 
+  geom_vline(xintercept=median(clean_data$ENROLL), linetype="dashed",
+             color='red')
+
+# Because the above graph is right skewed trying log 10.  
+
+ggplot(data=clean_data, aes(x=ENROLL)) +
+  ggtitle("Histogram using log 10 - note 'x' axis scale") +
+  geom_histogram(color='black',fill='grey') +
+  scale_x_log10()
+
+# Box plot to get a better idea of the distribution.
+qplot(x="",y=ENROLL,
+  data =clean_data,
+  geom = 'boxplot') +
+  xlab("") + 
+  coord_cartesian(ylim = c(0,10000))
+
+
+
+ggplot(data=clean_data, aes(x=TOTALREV )) +
+  xlim(0,500000) + 
+  xlab(TOTALREV_SUB) + 
+  geom_histogram(binwidth=10000,color='black',fill='yellow') +
+  geom_vline(xintercept=median(clean_data$TOTALREV), linetype="dashed",
+             color='red')
+
+ggplot(data=clean_data, aes(x=TOTALEXP) ) +
+  xlim(0,500000) + 
+  xlab(TOTALEXP_SUB) + 
+  geom_histogram(binwidth=10000,color='black',fill='orange') + 
+  geom_vline(xintercept=median(clean_data$TOTALEXP), linetype="dashed",
+             color='red')
+
+ggplot(data=clean_data, aes(x=TFEDREV) ) +
+  xlim(0,80000) + 
+  xlab(TFEDREV_SUB) + 
+  geom_histogram(binwidth=1000,color='black',fill='white') + 
+  geom_vline(xintercept=median(clean_data$TFEDREV), linetype="dashed",
+             color='red')
+
+ggplot(data=clean_data, aes(x=TSTREV) ) +
+  xlim(0,80000) + 
+  xlab(TSTREV_SUB) + 
+  geom_histogram(binwidth=1000,color='black',fill='pink') + 
+  geom_vline(xintercept=median(clean_data$TSTREV), linetype="dashed",
+             color='red')
+
+ggplot(data=clean_data, aes(x=TLOCREV) ) +
+  xlim(0,80000) + 
+  xlab(TLOCREV_SUB) +
+  geom_histogram(binwidth=1000,color='black',fill='light blue') +
+  geom_vline(xintercept=median(clean_data$TLOCREV), linetype="dashed",
+             color='red')
+
+ggplot(data=clean_data, aes(x=PPCSTOT) ) +
+  xlim(0,30000) + 
+  xlab(PPCSTOT_SUB) + 
+  geom_histogram(binwidth=500,color='black',fill='green') + 
+  geom_vline(xintercept=median(clean_data$PPCSTOT), linetype="dashed",
+             color='red') 
+
+
+# Box plot to get a better idea of the distribution.
+qplot(x="",y=PPCSTOT,
+  data =clean_data,
+  geom = 'boxplot') +
+  xlab("") + 
+  coord_cartesian(ylim = c(5000,25000))
+
+ggplot(data=clean_data, aes(x=PPITOTAL) ) +
+  xlim(0,30000) + 
+  xlab(PPITOTAL_SUB) + 
+  geom_histogram(binwidth=500,color='black',fill='brown') +
+  geom_vline(xintercept=median(clean_data$PPITOTAL), linetype="dashed",
+             color='red')
+
+ggplot(data=clean_data, aes(x=PPISALWG) ) +
+  xlim(0,15000) + 
+  xlab(PPISALWG_SUB) +
+  geom_histogram(binwidth=500,color='black',fill='magenta') + 
+geom_vline(xintercept=median(clean_data$PPISALWG), linetype="dashed",
+           color='red')
+
+ggplot(data=clean_data, aes(x=PPIEMBEN) ) +
+  xlim(0,15000) + 
+  xlab(PPIEMBEN_SUB) + 
+  geom_histogram(binwidth=500,color='black',fill='purple') +
+  geom_vline(xintercept=median(clean_data$PPIEMBEN), linetype="dashed",
+             color='red')
+
+
+```
+
+
+* All the histograms are right skewed with there still being values far to the 
+right.
+* Using a histogram with log 10 was able to see the normalized distribution for 
+enrollment.  This was a good sest of data for using the log 10 because it's
+easy to think of numbers of people in sets of 100,1000,10000, etc.
+* Using a boxplot it was possible to see that although there's a large variation 
+in school size, there's a large number of school districts under 2500 students.
+* The total amount spent per student is also skewed right, but a little more 
+normalized.  It is unexpected that the amount spent on a per student basis would
+differ so drastically. Possible factors: cost of living, special needs 
+population?
+* Also created a box plot for total spending per student to get an idea of
+the distribution.
+
+# Bivariate Plots 
+
+> **GGPAIRS matrix** - Getting some basic correlation data
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,ggpairs}
+
+# Trimming to get easy to read matrix plot
+mdata <- subset(clean_data, 
+                       select=c(
+                         "ENROLL",
+                         "TOTALEXP",
+                         "PPCSTOT",
+                         "PPITOTAL",
+                         "PPISALWG",
+                         "PPIEMBEN"
+                       ))
+
+
+ggpairs(mdata)
+
+```
+
+> **Plots of enrollment vs expenses**
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,enroll_vs_expense}
+
+ggplot(data=clean_data, aes(x=ENROLL,y=TOTALEXP)) +
+  xlim(0,125000) + 
+  ylim(0,2000000) +
+  xlab(ENROLL_SUB) + 
+  ylab(TOTALEXP_SUB) + 
+  ggtitle("Includes schools up to 120,000 students") + 
+  geom_point(color='blue',alpha=1/4)
+
+ggplot(data=clean_data, aes(x=ENROLL,y=TOTALEXP)) +
+  xlim(0,10000) + 
+  ylim(0,750000) +
+  xlab(ENROLL_SUB) + 
+  ylab(TOTALEXP_SUB) + 
+  ggtitle("Includes schools up to 10,000 students") +
+  geom_point(color='dark green',alpha=1/4)
+
+```
+
+The relationship between enrollment and and total expenses looks very linear at 
+the lower numbers, but as the enrollment goes up, the relationship
+scatters.  Also even though the relationship is fairly linear there is quite
+a bit of variation and some outliers.
+
+Note that at this point decided to look mainly at  districts with less than 
+125,000 vs districts like NYC that has almost a million students or Hawaii where
+the whole state is one district.
+
+> **Plots of enrollment vs total per student sending**
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,enroll_vs_ppexpense}
+
+ggplot(data=clean_data, aes(x=ENROLL,y=PPCSTOT)) +
+  xlim(0,125000) + 
+  ylim(0,50000) +
+  geom_point(color="blue",alpha=1/5) + 
+  xlab(ENROLL_SUB) + 
+  ylab(PPCSTOT_SUB) + 
+  ggtitle("Includes schools up to 125,000 students") +
+  geom_hline(yintercept=median(clean_data$PPCSTOT), linetype="dashed",color='red')
+
+
+ggplot(data=clean_data, aes(x=ENROLL,y=PPCSTOT)) +
+  xlim(0,10000) + 
+  ylim(0,50000) +
+  geom_point(color="dark green",alpha=1/5) + 
+  xlab(ENROLL_SUB) + 
+  ylab(PPCSTOT_SUB) + 
+  ggtitle("Includes schools up to 50,000 students") +
+  geom_hline(yintercept=median(clean_data$PPCSTOT), linetype="dashed",color='red')
+
+
+ggplot(data=clean_data, aes(x=ENROLL,y=PPCSTOT)) +
+  xlim(0,1000) + 
+  ylim(0,50000) +
+  xlab(ENROLL_SUB) + 
+  ylab(PPCSTOT_SUB) + 
+  ggtitle("Includes schools up to 1,000 students") +
+  geom_point(color="orange",alpha=1/5) + 
+  geom_hline(yintercept=median(clean_data$PPCSTOT), linetype="dashed",color='red')
+
+
+```
+
+Horizontal line on plots above is the median.  It appears that the spending per 
+student is at the lower enrollments hovers around the median, but there are
+quite a few schools where the spending is substantially higher. Starting to 
+bring up questions:
+
+* What is the difference between the school that spends $7,000/student vs the one
+that spends $20,000/student?
+* The giant school districts seem to hover closer to the median than the smaller
+school districts. Why?
+
+
+> **Plots of enrollment vs revenue sources (Federal, State, Local)**
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,enroll_vs_tax_revenue}
+
+# Graphs of revenue sources.
+
+ggplot(data=clean_data, aes(x=ENROLL,y=TFEDREV)) +
+  xlim(0,125000) + 
+  ylim(0,50000) +
+  xlab(ENROLL_SUB) + 
+  ylab(TFEDREV_SUB) + 
+  geom_vline(xintercept=10000, linetype="dashed",color='red') + 
+  geom_point(color="blue",alpha=1/5) 
+
+ggplot(data=clean_data, aes(x=ENROLL,y=TSTREV)) +
+  xlim(0,125000) + 
+  ylim(0,1000000) +
+  xlab(ENROLL_SUB) + 
+  ylab(TSTREV_SUB) +
+  geom_vline(xintercept=10000, linetype="dashed",color='red') +
+  geom_point(color="dark green",alpha=1/5) 
+
+
+ggplot(data=clean_data, aes(x=ENROLL,y=TLOCREV)) +
+  xlim(0,125000) + 
+  ylim(0,200000) +
+  xlab(ENROLL_SUB) + 
+  ylab(TLOCREV_SUB) +
+  geom_vline(xintercept=10000, linetype="dashed",color='red') +
+  geom_point(color="orange",alpha=1/5) 
+
+
+```
+
+Added a red dashed line for enrollment = 10,000 students to make it easier to compare
+the various sources of funding.  
+
+Looks like most money comes from
+Where the money comes from looks interesting.  While state funding looks pretty 
+linear.  Looks like most money for education comes from state and local sources.
+
+# Bivariate Plots Section 2
+
+Based on the plots above there is a need to create additional data to get more 
+specific plots.
+
+* PPTISB = PPISALWG + PPIEMBEN - Teacher compensation per student 
+for instruction
+* PPPOI = PPTISB/PPCSTOT - Percentage of money spent on teacher compensation 
+* PLOCALREV = TLOCREV/TOTALREV - Local rev percentage of total revenue
+* OKCA = OK, CA, NY, NJ, AZ, WA, OR, MA, IA OTHER to be able to more detailed 
+information at the state level on the same plot.
+
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,new_columns_1}
+
+# Adding additional computed variables for additional graphing.
+clean_data$PPTISB = clean_data$PPISALWG + clean_data$PPIEMBEN
+clean_data$PPPOI = clean_data$PPTISB/clean_data$PPCSTOT
+clean_data$PLOCALREV= clean_data$TLOCREV/clean_data$TOTALREV
+# head(clean_data)
+
+summary(subset(clean_data, 
+                       select=c(
+                         "PPTISB",
+                         "PPPOI",
+                         "PLOCALREV"
+                       )))
+
+
+  
+
+```
+
+The summary showed percentages over 1 for percent of total spent per pupil for 
+salaries, wages benefits.  Did some spot checks and found that there were only a
+handful of schools impacted.  Brings up questions as to the reliability of the 
+data, but since this is not for professional use, will not investigate further.
+
+
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,new_columns_2}
+
+# Creating new column with 9 states plus other 
+
+clean_data$OKCA = "Other"
+clean_data[clean_data$STATE == "CA",]$OKCA <- "CA"
+clean_data[clean_data$STATE == "OK",]$OKCA <- "OK"
+clean_data[clean_data$STATE == "NY",]$OKCA <- "NY"
+clean_data[clean_data$STATE == "AZ",]$OKCA <- "AZ"
+clean_data[clean_data$STATE == "NJ",]$OKCA <- "NJ"
+clean_data[clean_data$STATE == "OR",]$OKCA <- "OR"
+clean_data[clean_data$STATE == "WA",]$OKCA <- "WA"
+clean_data[clean_data$STATE == "IA",]$OKCA <- "IA"
+clean_data[clean_data$STATE == "MA",]$OKCA <- "MA"
+
+small_set <- clean_data[clean_data$OKCA != "Other", ]
+#small_set[small_set$ENROLL == "NA",]
+
+just_three <- subset(small_set, OKCA == "CA" | OKCA == "NJ" | OKCA == "OK")
+
+```
+> **Plots Looking at percentage of local rev vs other variables**
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,per_local_rev}
+
+ggplot(data=clean_data, aes(x=TOTALEXP,y=PLOCALREV)) +
+  xlim(0,250000) +
+  xlab(TOTALEXP_SUB) + 
+  ylab(PLOCALREV_SUB) + 
+  ggtitle("Includes revenue up to 250,000,000 dollars") +
+  geom_point(color="black",alpha=1/5) 
+
+ggplot(data=clean_data, aes(x=PPCSTOT,y=PLOCALREV,alpha=1/100)) +
+  xlim(0,50000) +
+  xlab(PPCSTOT_SUB) + 
+  ylab(PLOCALREV_SUB) + 
+  ggtitle("Includes up to 50,000 dollars per student spending") +
+  geom_point(color="blue",alpha=1/5) 
+
+
+ggplot(data=clean_data, aes(x=PPTISB,y=PLOCALREV)) +
+  xlim(0,20000) +
+  xlab(PPTISB_SUB) + 
+  ylab(PLOCALREV_SUB) + 
+  ggtitle("Includes instructional salary and benefits per student of 20,000") +
+  geom_point(color="red",alpha=1/5) 
+
+
+```
+
+Had expected to maybe be able to see a trend, but did not see anything useful.
+Decided to look at a subset of data with a limited number of states.
+
+# Multivariate Plots Section
+
+> **Plots Looking at data for a subset of states**
+
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,subset_of_states_1}
+
+ggplot(data=small_set, aes(x=ENROLL,y=TOTALEXP)) +
+    facet_wrap(~ OKCA) +
+    xlim(1000,10000) +
+    ylim(0,100000) +
+    xlab(ENROLL_SUB) + 
+    ylab(TOTALEXP_SUB) +
+    ggtitle("Includes schools of 1000 - 10,000 students") +
+  geom_point(color="black",alpha=1/2) 
+
+ggplot(data=small_set, aes(x=ENROLL,y=PLOCALREV)) +
+   facet_wrap(~ OKCA) +
+    xlim(1000,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PLOCALREV_SUB) +
+    ggtitle("Includes schools of 1000 - 10,000 students") +
+  geom_point(color="blue",alpha=1/2) 
+
+ggplot(data=small_set, aes(x=ENROLL,y=PPTISB)) +
+   facet_wrap(~ OKCA) +
+    xlim(50,1000) +
+    ylim(0,25000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTISB_SUB) +
+    ggtitle("Includes schools of 50 - 1000 students") +
+  geom_point(color="orange",alpha=1/2) 
+
+ggplot(small_set, aes(x=ENROLL,y=PPTISB)) +
+   facet_wrap(~ OKCA) +
+    xlim(1000,10000) +
+    ylim(0,25000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTISB_SUB) +
+      ggtitle("Includes schools of 1000 - 10,000 students") +
+  geom_point(color="red",alpha=1/2) 
+
+
+ggplot(data=small_set, aes(x=ENROLL,y=PPPOI)) +
+   facet_wrap(~ OKCA) +
+    xlim(1000,10000) +
+    ylim(.25,.75) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPPOI_SUB) +
+    ggtitle("Includes schools of 1000 - 10,000 students") +
+  geom_point(color="green",alpha=1/2) 
+```
+
+Starting to see some noticeable differences:
+
+* New York spends a lot more on education than Oklahoma.  
+* California has a lot of variation in spending.
+* It's looking pretty clear that MA, NY, and NJ are spending significantly more 
+on teacher compensation than CA, AZ, OK.
+
+> **Plot Looking at just 1 state (New York) a little deeper **
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,subset_of_states_2}
+ggplot(data=small_set[small_set$OKCA=="NY",], 
+       aes(x=ENROLL,y=PPCSTOT,color=PLOCALREV)) +
+    xlim(1000,10000) +
+    ylim(0,30000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPCSTOT_SUB) +
+  geom_point() +
+  scale_colour_gradientn(colours=rainbow(4)) 
+
+```
+
+It does appear that total per student spending goes up when the percent of 
+funding from local revenue for the school district goes up.
+
+> **Narrowing down to instructional salary and benefits **
+
+* "PPISALWG" - Per student total spending for salaries and wages for instruction
+* "PPIEMBEN" - Per student total employee benefits for instruction
+
+Looking at a few more factors.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,more_plots_dollars_to_sb}
+ggplot(data=small_set, aes(x=ENROLL,y=PPISALWG)) +
+   facet_wrap(~ OKCA) +
+    xlim(50,10000) +
+    ylim(2500,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPISALWG_SUB) +
+  geom_point(color="red") 
+
+ggplot(data=small_set, aes(x=ENROLL,y=PPIEMBEN)) +
+   facet_wrap(~ OKCA) +
+    xlim(50,10000) +
+    ylim(0,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPIEMBEN_SUB) +
+  geom_point(color="orange") 
+
+ggplot(small_set, aes(x=ENROLL,y=PPTISB)) +
+   facet_wrap(~ OKCA) +
+    xlim(50,10000) +
+    ylim(2500,20000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTISB_SUB) +
+  geom_point(color="green")
+
+```
+
+
+> **Narrowing down to just 3 states, NJ, CA, & OK **
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,more_plots_3_variables_}
+ggplot(just_three, aes(x=ENROLL,y=PPTISB,color=OKCA)) +
+    xlim(50,1000) +
+    ylim(2500,11000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTISB_SUB) +
+    ggtitle("Includes schools of 50 - 1000 students") +
+  geom_point()
+
+
+ggplot(just_three, aes(x=ENROLL,y=PPTISB,color=OKCA)) +
+    xlim(1000,10000) +
+    ylim(2500,11000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTISB_SUB) +
+   ggtitle("Includes schools of 1000 - 10,000 students") +
+  geom_point()
+
+ggplot(just_three, aes(x=ENROLL,y=PPCSTOT,color=OKCA)) +
+    xlim(50,1000) +
+    ylim(2500,20000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPCSTOT_SUB) +
+    ggtitle("Includes schools of 50 - 1000 students") +
+  geom_point()
+
+
+ggplot(just_three, aes(x=ENROLL,y=PPCSTOT,color=OKCA)) +
+    xlim(1000,10000) +
+    ylim(2500,20000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPCSTOT_SUB) +
+    ggtitle("Includes schools of 1000 - 10,000 students") +
+  geom_point()
+
+# head(just_three)
+```
+
+CA is way below NJ and not too far above OK although it's pretty well known that 
+it's much more expensive to live in California.  So what happens if a cost of 
+living index is applied to the values?
+
+> **Factoring in the cost of living for NJ, CA, & OK **
+
+Grabbed some data from 2017 (close enough) from:
+[US Learning](https://www.uslearning.net/cost-of-living-by-state.html)
+
+* CA - 136.3
+* NJ - 121.2
+* OK - 89.1
+
+To normalize the data will take the total spent on salaries and benefits
+per pupil divided by the index/100 just to get a more dollar based amount.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,normalized}
+
+#just_three[just_three$STATE == "CA",]$OKCA <- "CA"
+#head(just_three)
+
+just_three$PPNORM[just_three$OKCA == "CA"] <-  just_three$PPTISB * (100/136.3)
+just_three$PPNORM[just_three$OKCA == "NJ"] <-  just_three$PPTISB * (100/121.2)
+just_three$PPNORM[just_three$OKCA == "OK"] <-  just_three$PPTISB * (100/89.1)
+
+ggplot(just_three, aes(x=ENROLL,y=PPNORM,color=OKCA)) +
+    xlim(50,1000) +
+    ylim(1000,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPNORM_SUB) +
+   ggtitle("Includes school districts of 50 - 1000 students") +
+  geom_point()
+
+ggplot(just_three, aes(x=ENROLL,y=PPNORM,color=OKCA)) +
+    xlim(1000,10000) +
+    ylim(1000,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPNORM_SUB) +
+    ggtitle("Includes school districts of 1000 - 10,000 students") +
+  geom_point()
+
+
+
+```
+
+Based on the graphs above accounting for cost of living, it seems Oklahoma 
+teachers get paid more than either New jersey or California.
+
+> **Factoring in the class size for NJ, CA, & OK **
+
+In theory class size would have impact the actual salaries.  If compensation is 
+the per student money spent on instructional salaries and benefits than:
+
+* Higher class size = higher salary
+* Lower class size = lower salary
+
+If the per student instructional compensation were the same.
+
+(Note: This doesn't examine quality of education based or difficulty of the 
+teaching role as class size increases.)
+
+From:  
+
+[National Center for Education Statistics](https://nces.ed.gov/programs/digest/d16/tables/dt16_209.30.asp)
+
+This information is from 2012 so things may be a little old.  Four years is a 
+long time.  But unless the states increased or decreased disproportionately 
+to other states the results should be similar.
+
+Decide to use the numbers provided in the following way:
+
+(Average class size by level of instruction Elementary + 
+Average class size by level of instruction Secondary)  
+divided by 2. Then normalize that using the average US class size
+
+* CA - (25.0	+	32.0)/2  
+* NJ - (18.5	+	23.9)/2	
+* OK - (20.7	+	23.7)/2	
+* US - (21.3	+	26.8)/2	 
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,class_size_normalized}
+USS <- (21.3	+	26.8)/2	
+CAS <- ((25.0	+	32.0)/2)/USS 
+NJS <- ((18.5	+	23.9)/2)/USS	
+OKS <- ((20.7	+	23.7)/2)/USS
+
+
+just_three$PPTEACH[just_three$OKCA == "CA"] <-  just_three$PPTISB * CAS
+just_three$PPTEACH[just_three$OKCA == "NJ"] <-  just_three$PPTISB * CAS
+just_three$PPTEACH[just_three$OKCA == "OK"] <-  just_three$PPTISB * CAS
+
+ggplot(just_three, aes(x=ENROLL,y=PPTEACH,color=OKCA)) +
+    xlim(50,1000) +
+    ylim(2500,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTEACH_SUB) +
+    ggtitle("Includes school districts of 50 - 1000 students") +
+  geom_point()
+
+ggplot(just_three, aes(x=ENROLL,y=PPTEACH,color=OKCA)) +
+    xlim(1000,10000) +
+    ylim(2500,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTEACH_SUB) +
+    ggtitle("Includes school districts of 1000 - 10,000 students") +
+  geom_point()
+
+```
+
+**Results:**  Once you add in cost of living and class size there while there is 
+a lot of variation across states, there doesn't appear to be a big difference
+between California, New Jersey and Oklahoma in terms of Instructional Salaries
+and benefits.
+
+# Final Plots and Summary 
+
+### Plot One 
+```{r echo=FALSE, message=FALSE,warning=FALSE,Plot_One}
+ggplot(just_three, aes(x=ENROLL,y=PPTISB,color=OKCA)) +
+    xlim(1000,10000) +
+    ylim(2500,20000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTISB_SUB) +
+    labs(color="State") + 
+    ggtitle("Data straight from published information",
+            subtitle="Includes school districts of 1000 - 10,000 students") +
+  geom_point()
+
+
+```
+
+### Description One
+Using the cleaned up data from: 
+
+[2016 Public Elementary-Secondary Education Finance Data](https://www.census.gov/data/tables/2016/econ/school-finances/secondary-education-finance.html)
+
+to graph the per student spend on instructional salary and benefits for 
+California, New Jersey and Oklahoma there is a clear indication that the per 
+student spending in Oklahoma is far less than California or New Jersey for 
+school districts between 1000 and 10,000 students.
+
+It also appears that the variation of what is spent per student is far greater
+in California and New Jersey than in Oklahoma.
+
+Using this graph alone:
+
+* Oklahoma teachers are justified in how upset they are regarding salary and
+benefits provided.
+
+### Plot Two
+```{r echo=FALSE, message=FALSE,warning=FALSE,Plot_Two}
+ggplot(just_three, aes(x=ENROLL,y=PPNORM,color=OKCA)) +
+    xlim(50,1000) +
+    ylim(1000,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPNORM_SUB) +
+    labs(color="State") + 
+  ggtitle("Data normalized for cost of living",
+          subtitle="Includes school districts of 1000 - 10,000 students") +
+  geom_point()  
+```
+
+### Description Two
+
+Grabbed some data from 2017 (close enough) from:
+[US Learning](https://www.uslearning.net/cost-of-living-by-state.html)
+
+Normalized for cost of living:
+
+* CA - 136.3
+* NJ - 121.2
+* OK - 89.1
+
+The schools switch places.  California falls to the bottom.  New Jersey ends up 
+in the middle and it appears that Oklahoma teachers are the best paid teachers.
+Also the variation in spending per student on instructional salaries and 
+benefits for Oklahoma appears larger once the cost of living index is applied 
+since a dollar in Oklahoma goes farther than it does in California or 
+New Jersey.
+
+
+### Plot Three
+```{r echo=FALSE, message=FALSE,warning=FALSE,Plot_Three}
+ggplot(just_three, aes(x=ENROLL,y=PPTEACH,color=OKCA)) +
+    xlim(1000,10000) +
+    ylim(2500,10000) +
+    xlab(ENROLL_SUB) + 
+    ylab(PPTEACH_SUB) +
+    labs(color="State") + 
+    ggtitle("Data normalized for class size",
+            subtitle="Includes school districts of 1000 - 10,000 students") +
+  geom_point()
+
+```
+
+### Description Three
+
+Because the data on plot 1 and plot 2 is NOT strictly reflective of how much 
+a particular teacher gets paid in any of the states it is necessary to use a
+normalizer to try to compute what the relationships might look like.
+
+Using class size information:
+
+From:  
+[National Center for Education Statistics](https://nces.ed.gov/programs/digest/d16/tables/dt16_209.30.asp)
+
+This information is from 2012 so things may be a little old.  Four years is a 
+long time
+
+Decide to use the numbers provided in the following way:
+
+Average class size for teachers in self-contained classes	+ 
+Average class size for teachers in departmentalized instruction	
+and divide by 2. Then normalize that using the average US class size.
+
+* CA - (25.0	+	32.0)/2  
+* NJ - (18.5	+	23.9)/2	
+* OK - (20.7	+	23.7)/2	
+* US - (21.3	+	26.8)/2	 
+
+and normalizing the data in plot 2 created the plot above.
+
+Now the data from all three states starts to overlap indicating that maybe there
+is less of a difference on what is spent on teacher salary and benefits by state
+than what the original data showed alone.
+
+Note that the final numbers on the y axis are not real numbers for any of the 
+states, but an indication of spending relative to each other.
+
+------
+
+# Reflection
+
+> **What were some of the struggles?**
+
+  * I thought I had a really good dataset to start out with, but the more I 
+  looked at it, the more I realized that I needed to clean it up first.
+  * I had an expectation that different things about educational spending
+  would pop out right away, but actually there is a lot of variation by school
+  district, so it was harder to see trends than I expected.
+  * I hadn't been using Rstudio previously in a way that could be used by knit
+  so I had to learn a lot of the details of Rstudio while working on the 
+  project.
+  
+> **What went well? **
+
+  * Using the full dataset and a few different graphing techniques I was able to
+  narrow down to an area of interest.
+  * As I found some bad data in the dataset, I started to realize that I got 
+  lucky that the dataset was as good as it was.
+  
+> **What was surprising?**
+
+  * That government published data could have so much detailed information, but
+  still have errors.
+  * That the state of Hawaii has only one school district.
+  * That NYC has almost a million students and a budget of 20+ billion
+  dollars.
+  * That there is so much variation on what is spent per student on across the
+  country and across a state.
+  * That there are so many individual school districts
+
+> **What further investigations could be done?**
+
+  * Could try to find more recent class size information and see if the results
+  are the same.
+  * Could could create data on a map.
+  * Could do a more detailed analysis of just one state and how and why spending
+  varies within a state.
+  
+
